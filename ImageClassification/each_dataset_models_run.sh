@@ -26,7 +26,7 @@ for dir in "$models_path"/*; do
                 echo "#################   exciting ${dirname} with ${dataname} now   #################"
                 # python pyscript/eachdataset_eachmodel.py --models_path "$models_path/$dirname" --mode "$mode" --epochs "$epochs" --dataset_path "$data_path/$dataname"
                 # echo "python eachdataset_eachmodel.py --models_path "$models_path$dirname" --mode "$mode" --epochs "$epochs" --dataset_path "$data_path/$dataname""
-                python pyscript/classifier.py --models_path "$models_path/$dirname" --data_path "$data_path/$dataname" --mode "$mode" --epochs "$epochs" --batchsize "$bs"
+                python pyscript/train.py --models_path "$models_path/$dirname" --data_path "$data_path/$dataname" --mode "$mode" --epochs "$epochs" --batchsize "$bs"
             fi
         done
     fi

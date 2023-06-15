@@ -21,7 +21,7 @@ for dir in "$models_path"/*; do
         # 只处理目录
         dirname=$(basename "$dir")
         echo "#################   exciting ${dirname} now   #################"
-        python pyscript/classifier.py --models_path "$models_path/$dirname" --data_path "$data_path" --mode "$mode" --epochs "$epochs" --batchsize "$bs"
+        python pyscript/train.py --models_path "$models_path/$dirname" --data_path "$data_path" --mode "$mode" --epochs "$epochs" --batchsize "$bs"
     fi
 done
 echo "Done..."

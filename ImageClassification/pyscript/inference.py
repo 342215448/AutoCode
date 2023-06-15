@@ -7,9 +7,11 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # 进行图像预处理
-def load_image(image_path):
+def load_image(image_path, mode_size):
+
+    picture_dataSize = int(mode_size)
     transform = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((picture_dataSize, picture_dataSize)),
         transforms.ToTensor(),
         transforms.Normalize(
             mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -18,22 +20,9 @@ def load_image(image_path):
     image = transform(image).unsqueeze(0)
     return image
 
-
-if __name__ == "__main__":
-    # 提供模型字典的参数
-    model_path = "/workspace/ImageClassification/checkpoints/beit-base-224_cifar-10-batchesbest_model.pth"
-
-    # 输入图像的路径
-    image_path = "/workspace/ImageClassification/dataset/cifar-10-batches/test/ship/image_72.png"
-
-    # 设置文件夹路径
-    folder_path = "/workspace/ImageClassification/dataset/cifar-10-batches/test"
-
-    # 设置模型路径
-    pretrain_model = "/workspace/ImageClassification/models/base-model/beit-base-224"
-
+def inference_image(model_path, image_path, folder_path, pretrain_model):
     # 加载图像
-    image = load_image(image_path)
+    image = load_image(image_path, model_path.split('/')[-1].split('_')[-3].split('-')[-1])
 
     # 初始化模型
     model = AutoModelForImageClassification.from_pretrained(pretrain_model)
@@ -60,3 +49,20 @@ if __name__ == "__main__":
     results.sort(key=lambda x: x[1], reverse=True)
     top_label, top_probability = results[0]
     print(f"Top Prediction: {top_label} ({top_probability:.4f})")
+
+
+if __name__ == "__main__":
+    # 提供模型字典的参数
+    model_path = "/workspace/ImageClassification/checkpoints/beit-base-224_cifar-10-batchesbest_model.pth"
+
+    # 输入图像的路径
+    image_path = "/workspace/ImageClassification/dataset/cifar-10-batches/test/ship/image_72.png"
+
+    # 设置文件夹路径
+    folder_path = "/workspace/ImageClassification/dataset/cifar-10-batches/test"
+
+    # 设置模型路径
+    pretrain_model = "models/base-model/"+model_path.split('/')[-1].split('_')[-3]
+
+    # 执行推理
+    inference_image(model_path, image_path, folder_path, pretrain_model)
