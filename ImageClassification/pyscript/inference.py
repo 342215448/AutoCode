@@ -69,7 +69,8 @@ if __name__ == "__main__":
     image_path = "dataset/JYX/test/JYX2/JYX2 (401).JPG"
 
     # 设置文件夹路径
-    folder_path = "dataset/JYX/test/"
+    folder_path = image_path.split('/')[0]+image_path.split('/')[1]+image_path.split('/')[2]
+    # folder_path = "dataset/JYX/test/"
 
     # 设置模型路径
     pretrain_model = "models/base-model/"+model_path.split('/')[-1].split('_')[-3]
