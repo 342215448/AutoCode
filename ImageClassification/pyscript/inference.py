@@ -21,6 +21,7 @@ def load_image(image_path, mode_size):
     return image
 
 def inference_image(model_path, image_path, folder_path, pretrain_model):
+
     # 加载图像
     image = load_image(image_path, model_path.split('/')[-1].split('_')[-3].split('-')[-1])
 
@@ -28,7 +29,16 @@ def inference_image(model_path, image_path, folder_path, pretrain_model):
     model = AutoModelForImageClassification.from_pretrained(pretrain_model)
 
     # 加载模型参数
-    model.load_state_dict(torch.load(model_path))
+    # model.load_state_dict(torch.load(model_path))
+    # 解决多卡训练的模型单卡推理时外层嵌套model.的问题
+    weights = torch.load(model_path)
+    
+    weights_dict = {}
+    for k, v in weights.items():
+        new_k = k.replace('module.', '') if 'module' in k else k
+        weights_dict[new_k] = v
+    
+    model.load_state_dict(weights_dict)
 
     # 设置设备
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -53,13 +63,13 @@ def inference_image(model_path, image_path, folder_path, pretrain_model):
 
 if __name__ == "__main__":
     # 提供模型字典的参数
-    model_path = "/workspace/ImageClassification/checkpoints/beit-base-224_cifar-10-batchesbest_model.pth"
+    model_path = "checkpoints/beit-base-224_JYX_best-model.pth"
 
     # 输入图像的路径
-    image_path = "/workspace/ImageClassification/dataset/cifar-10-batches/test/ship/image_72.png"
+    image_path = "dataset/JYX/test/JYX2/JYX2 (401).JPG"
 
     # 设置文件夹路径
-    folder_path = "/workspace/ImageClassification/dataset/cifar-10-batches/test"
+    folder_path = "dataset/JYX/test/"
 
     # 设置模型路径
     pretrain_model = "models/base-model/"+model_path.split('/')[-1].split('_')[-3]
