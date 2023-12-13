@@ -215,13 +215,30 @@ if __name__ == "__main__":
     train_dataset, val_dataset = torch.utils.data.random_split(
         train_dataset, [train_size, val_size])
 
-    # 创建数据加载器
-    batch_size = args.batchsize
-    # 根据线程数设置多线程处理数据 pin_memory在使用gpu的情况下要开启作为加速
-    num_workers = torch.get_num_threads()
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+    if args.fastTrain:
+        train_list = []
+        val_list = []
+        for line in tqdm(train_dataset, desc='loading train dataset...'):
+            train_list.append(line)
+        for line in tqdm(val_dataset, desc='loading validation dataset...'):
+            val_list.append(line)
+        # 创建数据加载器
+        batch_size = args.batchsize
+        # 根据线程数设置多线程处理数据 pin_memory在使用gpu的情况下要开启作为加速
+        num_workers = torch.get_num_threads()
+        
+        train_loader = DataLoader(train_list, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+        val_loader = DataLoader(val_list, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+    else:
+        # 创建数据加载器
+        batch_size = args.batchsize
+        # 根据线程数设置多线程处理数据 pin_memory在使用gpu的情况下要开启作为加速
+        num_workers = torch.get_num_threads()
+        
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
 
     # 初始化模型
     model = AutoModelForImageClassification.from_pretrained(model_path)
