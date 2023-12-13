@@ -186,6 +186,8 @@ if __name__ == "__main__":
                         help="The batchsize.")
     parser.add_argument("--data_path", type=str,
                         help="Path of dataset.")
+    parser.add_argument("--fastTrain", type=bool, default=True,
+                        help="When your mem is big enough...")
 
     args = parser.parse_args()
     model_path = args.models_path
