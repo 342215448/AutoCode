@@ -6,9 +6,11 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
-from transformers import AutoModelForImageClassification
+from transformers import AutoModelForImageClassification, get_scheduler
 from tqdm import tqdm
 import argparse
+import time
+from torch.cuda.amp import autocast, GradScaler
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -19,7 +21,6 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
 
 
-
 # 创建文件夹的函数
 def create_folder_if_not_exists(folder_path):
     if not os.path.exists(folder_path):
@@ -28,26 +29,51 @@ def create_folder_if_not_exists(folder_path):
     # else:
     #     print(f"文件夹 '{folder_path}' 已经存在")
 
-
-
 # 训练函数
-def train_epoch(model, loader, criterion, optimizer, output_file):
+def train_epoch(model, loader, criterion, optimizer, output_file, is_warmup, gc, scaler, is_autocast, total):
     model.train()
     running_loss = 0.0
     correct_predictions = 0
 
+    if is_warmup:
+        # 设置学习率策略
+        lr_scheduler = get_scheduler(
+            "linear",
+            optimizer=optimizer,
+            num_warmup_steps=0.1,
+            num_training_steps=total,
+        )
+
+    count_ = 0
     for images, labels in tqdm(loader, desc="trainging..."):
         images = images.to(device)
         labels = labels.to(device)
 
         optimizer.zero_grad()
-        outputs = model(images)
-        loss = criterion(outputs.logits, labels)
+        if is_autocast:
+            with autocast():
+                outputs = model(images)
+                loss = criterion(outputs.logits, labels)
+        else:
+            outputs = model(images)
+            loss = criterion(outputs.logits, labels)
         output_file.write('{:.2f}'.format(loss.item()))
         output_file.write('\n')
-        loss.backward()
-        optimizer.step()
-
+        if is_autocast:
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
+        count_ += 1
+        if count_ == gc:
+            if is_autocast:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+                optimizer.zero_grad()
+            count_ = 0
+        if is_warmup:
+            lr_scheduler.step()
         running_loss += loss.item()
         _, predicted = torch.max(outputs.logits, 1)
         correct_predictions += (predicted == labels).sum().item()
@@ -58,7 +84,7 @@ def train_epoch(model, loader, criterion, optimizer, output_file):
     return epoch_loss, accuracy
 
 # 验证函数
-def eval_epoch(model, loader, criterion):
+def eval_epoch(model, loader, criterion, is_autocast):
     model.eval()
     running_loss = 0.0
     correct_predictions = 0
@@ -68,7 +94,11 @@ def eval_epoch(model, loader, criterion):
             images = images.to(device)
             labels = labels.to(device)
 
-            outputs = model(images)
+            if is_autocast:
+                with autocast():
+                    outputs = model(images)
+            else:
+                outputs = model(images)
             loss = criterion(outputs.logits, labels)
 
             running_loss += loss.item()
@@ -81,7 +111,7 @@ def eval_epoch(model, loader, criterion):
     return epoch_loss, accuracy
 
 # 测试函数
-def test_epoch(model, loader, criterion):
+def test_epoch(model, loader, criterion, is_autocast):
     model.eval()
     running_loss = 0.0
     correct_predictions = 0
@@ -91,7 +121,11 @@ def test_epoch(model, loader, criterion):
             images = images.to(device)
             labels = labels.to(device)
 
-            outputs = model(images)
+            if is_autocast:
+                with autocast():
+                    outputs = model(images)
+            else:
+                outputs = model(images)
             loss = criterion(outputs.logits, labels)
 
             running_loss += loss.item()
@@ -104,7 +138,7 @@ def test_epoch(model, loader, criterion):
     return epoch_loss, accuracy
 
 # 训练函数
-def train(model, train_loader, val_loader, criterion, optimizer, num_epochs, model_name, data_name, mode_name):
+def train(model, train_loader, val_loader, criterion, optimizer, num_epochs, model_name, data_name, mode_name, is_warmup, gc, scaler, is_autocast, total):
     best_val_accuracy = 0.0
     loss_path = 'plot/'+mode_name+'/loss/'
     train_acc_path = 'plot/'+mode_name+'/train_acc/'
@@ -116,17 +150,20 @@ def train(model, train_loader, val_loader, criterion, optimizer, num_epochs, mod
     output_acc = open(train_acc_path+model_name + '-'+data_name+'-trainacc.txt', 'w')
     output_valacc = open(val_acc_path+model_name + '-'+data_name+'-valacc.txt', 'w')
     print("Using "+model_name+" with "+data_name)
+
+    start_time = time.time()
+
     for epoch in range(num_epochs):
         print(f'Epoch {epoch + 1}/{num_epochs}')
         train_loss, train_accuracy = train_epoch(
-            model, train_loader, criterion, optimizer, output_file)
+            model, train_loader, criterion, optimizer, output_file, is_warmup, gc, scaler, is_autocast, total)
         #  写入train_acc
         output_acc.write('{:.2f}'.format(train_accuracy))
         output_acc.write('\n')
         print(
             f'Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}')
 
-        val_loss, val_accuracy = eval_epoch(model, val_loader, criterion)
+        val_loss, val_accuracy = eval_epoch(model, val_loader, criterion, is_autocast)
         #  写入val_acc
         output_valacc.write('{:.2f}'.format(val_accuracy))
         output_valacc.write('\n')
@@ -147,9 +184,13 @@ def train(model, train_loader, val_loader, criterion, optimizer, num_epochs, mod
     output_acc.close()
     output_valacc.close()
 
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print(f'运行时间为:{execution_time/60}min')
+
 
 # 测试函数
-def batch_test(val_loader, criterion, model_name, data_name, mode_name):
+def batch_test(val_loader, criterion, model_name, data_name, mode_name, is_autocast):
     test_acc_path = 'plot/'+mode_name+'/test_acc/'
     create_folder_if_not_exists(test_acc_path)
     # 加载模型
@@ -160,7 +201,7 @@ def batch_test(val_loader, criterion, model_name, data_name, mode_name):
     csv_writer = csv.writer(output_file)
     #output_file.write('--------------------------------------\n')
     #output_file.write('checkpoints/' + model_name + '_' +data_name +'best_model.pth'+' has been loaded...\n')
-    val_loss, val_accuracy = test_epoch(model, val_loader, criterion)
+    val_loss, val_accuracy = test_epoch(model, val_loader, criterion, is_autocast)
 
     # output_file.write(f'model_name {val_accuracy:.2f}\n')
     csv_writer.writerow([model_name, f'{val_accuracy:.2f}'])
@@ -176,19 +217,24 @@ def batch_test(val_loader, criterion, model_name, data_name, mode_name):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Translate articles using a pretrained model.")
-    parser.add_argument("--models_path", type=str,
-                        help="Path of models, defaults resnet-50.", required=True)
-    parser.add_argument("--mode", type=str,
+    parser.add_argument("--models_path", type=str, default='models/base-model/swin-base-384',
+                        help="Path of models, defaults resnet-50.")
+    parser.add_argument("--mode", type=str, default='train',
                         help="train or test?")
-    parser.add_argument("--epochs", type=int,
+    parser.add_argument("--epochs", type=int, default=20,
                         help="The number of epochs to train.")
-    parser.add_argument("--batchsize", type=int,
-                        help="The batchsize.")
-    parser.add_argument("--data_path", type=str,
+    parser.add_argument("--batchsize", type=int, default=16,
+                        help="The batchsize. If you want larger batchsize and you don't have more mem, try --gradientAccu larger...")
+    parser.add_argument("--data_path", type=str, default='data/score',
                         help="Path of dataset.")
     parser.add_argument("--fastTrain", type=bool, default=True,
                         help="When your mem is big enough...")
-
+    parser.add_argument("--gradientAccu", type=int, default=4,
+                        help="Use gradient accumulation to make total batchsize bigger...")
+    parser.add_argument("--autocast", type=bool, default=True,
+                        help="Use mixed precision computation to accelerate trian speed...")
+    parser.add_argument("--dlr", type=bool, default=False,
+                        help="Use dynamic learning rate...")
     args = parser.parse_args()
     model_path = args.models_path
     mode = args.mode
@@ -210,13 +256,13 @@ if __name__ == "__main__":
     # 加载训练集和验证集
     train_dataset = ImageFolder(train_path, transform=transform)
     test_dataset = ImageFolder(test_path, transform=transform)
-
+    
     # 划分训练集和验证集
     train_size = int(0.8 * len(train_dataset))
     val_size = len(train_dataset) - train_size
     train_dataset, val_dataset = torch.utils.data.random_split(
         train_dataset, [train_size, val_size])
-
+    # 判断一下是否将全部数据放置于内存提高训练速度
     if args.fastTrain:
         train_list = []
         val_list = []
@@ -252,15 +298,16 @@ if __name__ == "__main__":
         model = nn.DataParallel(model)
 
     # 定义优化器
-    optimizer = optim.Adam(model.parameters(), lr=1e-5)
-
+    optimizer = optim.Adam(model.parameters(), lr=1e-5/args.gradientAccu)
+    
     # 定义损失函数
     criterion = nn.CrossEntropyLoss()
 
+    scaler = GradScaler()
     if mode == 'train':
-        train(model, train_loader, val_loader, criterion, optimizer, num_epochs, model_path.split('/')[-1], data_path.split('/')[-1], model_path.split('/')[-2])
+        train(model, train_loader, val_loader, criterion, optimizer, num_epochs, model_path.split('/')[-1], data_path.split('/')[-1], model_path.split('/')[-2], args.dlr, args.gradientAccu, scaler, args.autocast, len(train_loader)*num_epochs)
     elif mode == 'test':
-        batch_test(test_loader, criterion, model_path.split('/')[-1], data_path.split('/')[-1], model_path.split('/')[-2])
+        batch_test(test_loader, criterion, model_path.split('/')[-1], data_path.split('/')[-1], model_path.split('/')[-2], args.autocast)
     else:
         print("sorry, you have to choose one mode of train or test...")
 
