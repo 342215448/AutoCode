@@ -12,6 +12,9 @@ import argparse
 import time
 from torch.cuda.amp import autocast, GradScaler
 import random
+from accelerate import Accelerator
+# 设置成false则真实batchsize为numsgpu*batchsize
+accelerator = Accelerator(split_batches=False)
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -63,7 +66,7 @@ def train_epoch(model, loader, criterion, optimizer, output_file, is_warmup, gc,
         if is_autocast:
             scaler.scale(loss).backward()
         else:
-            loss.backward()
+            accelerator.backward(loss)
         count_ += 1
         if count_ == gc:
             if is_autocast:
@@ -155,9 +158,12 @@ def train(model, train_loader, val_loader, criterion, optimizer, num_epochs, mod
     start_time = time.time()
     total_params = sum(p.numel() for p in tqdm(model.parameters(), desc='caculating trainable parameters...') if p.requires_grad)
     print(f'###### total trainable parameter: {total_params}({(total_params/1000000000):.3f}B) ######')
+    model, optimizer, train_loader, valid_loader = accelerator.prepare(model, optimizer, train_loader, valid_loader)
     for epoch in range(num_epochs):
-        print(f'Epoch [{epoch + 1}/{num_epochs}] ' + "learning rage:" + str(optimizer.param_groups[0]['lr']))
-        # print("learning rage:" + str(optimizer.param_groups[0]['lr']))
+        print(f'Epoch {epoch + 1}/{num_epochs}')
+        # print("learning rage:" + str(optimizer.param_groups))
+        # print(is_warmup)
+        # exit(0)
         train_loss, train_accuracy = train_epoch(
             model, train_loader, criterion, optimizer, output_file, is_warmup, gc, scaler, is_autocast, total)
         #  写入train_acc
@@ -175,8 +181,10 @@ def train(model, train_loader, val_loader, criterion, optimizer, num_epochs, mod
         # 创建checkpoints路径
         create_folder_if_not_exists('checkpoints/')
         if val_accuracy > best_val_accuracy:
+            accelerator.wait_for_everyone()
+            unwrapped_model = accelerator.unwrap_model(model)
             best_val_accuracy = val_accuracy
-            torch.save(model.state_dict(), 'checkpoints/' +
+            torch.save(unwrapped_model.state_dict(), 'checkpoints/' +
                        model_name + '_' +data_name + '_best-model.pth')
             print('Saved the best model.')
 
@@ -234,7 +242,7 @@ if __name__ == "__main__":
                         help="When your mem is big enough...")
     parser.add_argument("--gradientAccu", type=int, default=1,
                         help="Use gradient accumulation to make total batchsize bigger...")
-    parser.add_argument("--autocast", type=bool, default=True,
+    parser.add_argument("--autocast", type=bool, default=False,
                         help="Use mixed precision computation to accelerate trian speed...")
     parser.add_argument("--dlr", type=bool, default=True,
                         help="Use dynamic learning rate...")
